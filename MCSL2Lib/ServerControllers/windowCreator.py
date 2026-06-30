@@ -1131,6 +1131,9 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         self.openServerFolder = PushButton(self.overviewPage)
         self.openServerFolder.setFixedSize(QSize(160, 32))
         self.overviewPageLayout.addWidget(self.openServerFolder, 0, 2, 1, 1)
+        self.openLogFolder = PushButton(self.overviewPage)
+        self.openLogFolder.setFixedSize(QSize(160, 32))
+        self.overviewPageLayout.addWidget(self.openLogFolder, 0, 3, 1, 1)
         self.backupSavesBtn = PushButton(self.overviewPage)
         self.backupSavesBtn.setFixedSize(QSize(160, 32))
         self.overviewPageLayout.addWidget(self.backupSavesBtn, 1, 2, 1, 1)
@@ -1361,6 +1364,7 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         ])
         self.backupServerBtn.setText(self.tr("备份服务器"))
         self.openServerFolder.setText(self.tr("打开服务器目录"))
+        self.openLogFolder.setText(self.tr("打开日志文件夹"))
         self.backupSavesBtn.setText(self.tr("备份存档"))
         self.genRunScriptBtn.setText(self.tr("生成启动脚本"))
         self.toggleServerBtn.setText(self.tr("启动服务器"))
@@ -1403,6 +1407,9 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         self.commandLineEdit.returnPressed.connect(self.commandLineEditTypeChecker)
         self.openServerFolder.clicked.connect(
             lambda: openLocalFile(f"./Servers/{self.serverConfig.serverName}")
+        )
+        self.openLogFolder.clicked.connect(
+            lambda: openLocalFile(f"./Servers/{self.serverConfig.serverName}/logs")
         )
         self.genRunScriptBtn.clicked.connect(self.genRunScript)
         self.toggleServerBtn.clicked.connect(self._onToggleServerBtnClicked)
@@ -1630,6 +1637,12 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         if not self.isCalledByConfigEditor:
             self.toggleServerBtn.setText(self.tr("关闭服务器"))
             self.exitServer.setText(self.tr("关闭服务器"))
+            # 概览页关闭按钮变红色
+            self.toggleServerBtn.setStyleSheet(
+                GlobalMCSL2Variables.darkWarnBtnStyleSheet
+                if isDarkTheme()
+                else GlobalMCSL2Variables.lightWarnBtnStyleSheet
+            )
             InfoBar.info(
                 title=self.tr("提示"),
                 content=self.tr("服务器正在启动，请稍后..."),
@@ -1661,6 +1674,10 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
     def unRegisterStartServerComponents(self):
         self.toggleServerBtn.setText(self.tr("开启服务器"))
         self.exitServer.setText(self.tr("开启服务器"))
+        # 恢复概览页按钮默认样式（PrimaryPushButton 默认绿色）
+        self.toggleServerBtn.setStyleSheet("")
+        # 确保按钮是 PrimaryPushButton 的默认绿色样式
+        self.toggleServerBtn.setProperty("type", "primary")
         try:
             self.toggleServerBtn.clicked.disconnect()
         except (AttributeError, TypeError):
@@ -2181,7 +2198,8 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             whiteListWidget.who.textChanged.connect(
                 lambda: self.playersControllerLineEditTypeChecker(text=whiteListWidget.who.text())
             )
-            whiteListWidget.playersTip.setText(self.getKnownServerPlayers())
+            whiteListWidget.setPlayersList(self.playersList)
+            whiteListWidget.playersTip.setText(self.tr("点击列表中的玩家快速选择，或手动输入"))
             content = (
                 self.tr("请确保服务器的白名单功能处于启用状态。\n")
                 + self.tr("启用: /whitelist on\n")
@@ -2220,7 +2238,8 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             opWidget.who.textChanged.connect(
                 lambda: self.playersControllerLineEditTypeChecker(text=opWidget.who.text())
             )
-            opWidget.playersTip.setText(self.getKnownServerPlayers())
+            opWidget.setPlayersList(self.playersList)
+            opWidget.playersTip.setText(self.tr("点击列表中的玩家快速选择，或手动输入"))
             w = MessageBox(self.tr("服务器管理员"), self.tr("添加或删除管理员"), self)
             w.yesButton.setText(self.tr("确定"))
             w.cancelButton.setText(self.tr("取消"))
@@ -2251,7 +2270,8 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             kickWidget.who.textChanged.connect(
                 lambda: self.playersControllerLineEditTypeChecker(text=kickWidget.who.text())
             )
-            kickWidget.playersTip.setText(self.getKnownServerPlayers())
+            kickWidget.setPlayersList(self.playersList)
+            kickWidget.playersTip.setText(self.tr("点击列表中的玩家快速选择，或手动输入"))
             w = MessageBox(self.tr("踢出玩家"), self.tr("踢出服务器中的玩家"), self)
             w.yesButton.setText(self.tr("确定"))
             w.cancelButton.setText(self.tr("取消"))
@@ -2274,7 +2294,8 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             banOrPardonWidget.who.textChanged.connect(
                 lambda: self.playersControllerLineEditTypeChecker(text=banOrPardonWidget.who.text())
             )
-            banOrPardonWidget.playersTip.setText(self.getKnownServerPlayers())
+            banOrPardonWidget.setPlayersList(self.playersList)
+            banOrPardonWidget.playersTip.setText(self.tr("点击列表中的玩家快速选择，或手动输入"))
             w = MessageBox(self.tr("封禁或解禁玩家"), "ban/pardon", self)
             w.yesButton.setText(self.tr("确定"))
             w.cancelButton.setText(self.tr("取消"))

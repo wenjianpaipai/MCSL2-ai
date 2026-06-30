@@ -21,6 +21,7 @@ from qfluentwidgets import (
     ComboBox,
     LineEdit,
     StrongBodyLabel,
+    ListWidget,
 )
 from MCSL2Lib.ProgramControllers.interfaceController import MySmoothScrollArea
 
@@ -104,6 +105,17 @@ class playersController(QWidget):
         self.playersTip.setObjectName("playersTip")
 
         self.verticalLayout.addWidget(self.playersTip)
+        
+        # 添加玩家列表选择
+        self.playersListTitle = StrongBodyLabel(self.tipScrollAreaWidgetContents)
+        self.playersListTitle.setText(self.tr("点击选择玩家:"))
+        self.verticalLayout.addWidget(self.playersListTitle)
+        
+        self.playersListWidget = ListWidget(self.tipScrollAreaWidgetContents)
+        self.playersListWidget.setMaximumHeight(120)
+        self.playersListWidget.itemClicked.connect(self.onPlayerSelected)
+        self.verticalLayout.addWidget(self.playersListWidget)
+        
         self.tipSmoothScrollArea.setWidget(self.tipScrollAreaWidgetContents)
         self.gridLayout.addWidget(self.tipSmoothScrollArea, 1, 0, 1, 2)
         self.tipSmoothScrollArea.setFrameShape(QFrame.NoFrame)
@@ -118,3 +130,15 @@ class playersController(QWidget):
         )
         self.playersTipTitle.setText(self.tr("当前在线玩家: (可能不准确)"))
         self.targetSelectorTipTitle.setText(self.tr("目标选择器提示: "))
+    def onPlayerSelected(self, item):
+        """点击列表中的玩家时填充到输入框"""
+        self.who.setText(item.text())
+    
+    def setPlayersList(self, players: list):
+        """设置玩家列表"""
+        self.playersListWidget.clear()
+        if players:
+            for player in players:
+                self.playersListWidget.addItem(player)
+        else:
+            self.playersListWidget.addItem(self.tr("(暂无在线玩家)"))
