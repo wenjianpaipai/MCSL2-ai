@@ -49,49 +49,54 @@ class MinecraftServerResMonitorUtil(QObject):
 
     def getServerMem(self):
         if not self.bridge.isServerRunning():
-            self.memPercent.emit(0.0000)
+            self.memPercent.emit(0.0)
             return
 
         try:
             process = Process(self.bridge.handledServer.process.processId())
             try:
-                mem_bytes = process.memory_full_info().uss
-            except (AccessDenied, PermissionError):
+                mem_info = process.memory_full_info()
+                mem_bytes = mem_info.uss
+            except (AccessDenied, PermissionError, AttributeError):
                 try:
-                    mem_bytes = process.memory_info().rss
+                    mem_info = process.memory_info()
+                    mem_bytes = mem_info.rss
                 except (AccessDenied, PermissionError):
                     MCSL2Logger.warning(
                         f"无法获取进程内存信息: pid={process.pid} 权限不足"
                     )
-                    self.memPercent.emit(0.0000)
+                    self.memPercent.emit(0.0)
                     return
 
             serverMem = mem_bytes / 1048576
-            self.memPercent.emit(float("{:.4f}".format(serverMem)))
+            self.memPercent.emit(float(f"{serverMem:.4f}"))
         except NoSuchProcess:
-            self.memPercent.emit(0.0000)
-        except AccessDenied:
-            MCSL2Logger.warning("进程内存查询被拒绝访问")
-            self.memPercent.emit(0.0000)
-        except PermissionError:
+            self.memPercent.emit(0.0)
+        except (AccessDenied, PermissionError):
             MCSL2Logger.warning("无权限访问进程内存信息")
-            self.memPercent.emit(0.0000)
+            self.memPercent.emit(0.0)
+        except Exception as e:
+            MCSL2Logger.warning(f"获取内存信息异常: {e}")
+            self.memPercent.emit(0.0)
 
     def getServerCPU(self):
+        if not self.bridge.isServerRunning():
+            self.cpuPercent.emit(0.0)
+            return
+
         try:
-            if self.bridge.isServerRunning():
-                serverCPU = Process(self.bridge.handledServer.process.processId()).cpu_percent(
-                    interval=0.01
-                )
-                self.cpuPercent.emit(float("{:.4f}".format(serverCPU / 10)))
-            else:
-                self.cpuPercent.emit(0.0000)
+            process = Process(self.bridge.handledServer.process.processId())
+            cpu_percent = process.cpu_percent(interval=None)
+            if cpu_percent is None:
+                cpu_percent = 0.0
+            self.cpuPercent.emit(float(f"{cpu_percent:.4f}"))
         except NoSuchProcess:
-            pass
-        except PermissionError:
-            pass
-        except AccessDenied:
-            pass
+            self.cpuPercent.emit(0.0)
+        except (PermissionError, AccessDenied):
+            self.cpuPercent.emit(0.0)
+        except Exception as e:
+            MCSL2Logger.warning(f"获取CPU信息异常: {e}")
+            self.cpuPercent.emit(0.0)
 
     @pyqtSlot(int)
     def onServerClosedHandler(self):
