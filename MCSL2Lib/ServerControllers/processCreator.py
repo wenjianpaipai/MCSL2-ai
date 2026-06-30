@@ -83,21 +83,18 @@ class _ServerProcessBridge(QObject):
         return self.handledServer
 
     def serverLogOutputHandler(self):
-        """
-        When the server outputs change, emit a signal with the updated output.
-        """
         newData = self.serverProcess.process.readAllStandardOutput().data()
-        self.partialData += newData  # Append the incoming data to the buffer
-        lines = self.partialData.split(b"\n")  # Split the buffer into lines
-        self.partialData = (
-            lines.pop()
-        )  # The last element might be incomplete, so keep it in the buffer
-
+        self.partialData += newData
+        lines = self.partialData.split(b"\n")
+        self.partialData = lines.pop()
         for line in lines:
             newOutput = line.decode(self.config.outputDecoding, errors="replace")
-            self.serverLogOutput.emit(
-                newOutput[:-1] if platform.system().lower() == "windows" else newOutput
-            )
+            # Windows 下去掉末尾的 \r，并添加换行符
+            if platform.system().lower() == "windows":
+                newOutput = newOutput.rstrip('\r') + '\n'
+            else:
+                newOutput = newOutput + '\n'
+            self.serverLogOutput.emit(newOutput)
 
     def startServer(self):
         """

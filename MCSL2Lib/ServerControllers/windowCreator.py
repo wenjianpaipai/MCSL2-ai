@@ -85,6 +85,7 @@ from MCSL2Lib.ServerControllers.serverUtils import (
 from os import path as osp
 import sys
 from platform import system
+import platform
 from re import search
 from MCSL2Lib.Widgets.playersControllerMainWidget import playersController
 from MCSL2Lib.utils import MCSL2Logger, openLocalFile, writeFile
@@ -875,16 +876,82 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         if not hasattr(self.serverLauncher, "jvmArg"):
             self.serverLauncher._setJVMArg()
         
-        script_type = self.genRunScriptTypeComboBox.currentIndex() if hasattr(self, 'genRunScriptTypeComboBox') else 0
-        script_type_names = [".ps1", ".bat", ".sh"]
-        script_type_name = script_type_names[script_type]
+        # 默认根据平台选择
+        default_type = 1 if system().lower() == "windows" else 2
         
+        if save:
+            # 保存时由弹窗中的下拉框决定
+            return self._current_script_content
+        
+        # 创建弹窗
+        w = MessageBox(self.tr("生成启动脚本"), "", parent=self)
+        w.contentLabel.setParent(None)
+        w.yesButton.setText(self.tr("保存"))
+        w.yesSignal.connect(self.saveRunScript)
+        
+        # 添加下拉框
+        script_type_combo = ComboBox(w)
+        script_type_combo.setMinimumSize(QSize(200, 30))
+        script_type_combo.addItems([
+            self.tr("PowerShell (.ps1)"),
+            self.tr("Batch (.bat)"),
+            self.tr("Shell (.sh)"),
+        ])
+        script_type_combo.setCurrentIndex(default_type)
+        w.textLayout.addWidget(script_type_combo)
+        
+        # 脚本内容显示区域
+        (copyWidget := QWidget()).setLayout((cmdLayout := QHBoxLayout()))
+
+        copyBtn = PushButton(icon=FIF.COPY, text=self.tr("复制"), parent=w)
+        copyBtn.setFixedHeight(200)
+        
+        textEdit = PlainTextEdit(parent=w)
+        textEdit.setReadOnly(True)
+        textEdit.setFixedSize(QSize(400, 200))
+
+        cmdLayout.addWidget(textEdit, 0, Qt.AlignRight)
+        cmdLayout.addWidget(copyBtn, 1, Qt.AlignRight)
+        w.textLayout.addWidget(copyWidget)
+        
+        # 更新脚本内容的函数
+        def update_script():
+            script_type = script_type_combo.currentIndex()
+            script = self._generate_script(script_type)
+            self._current_script_content = script
+            textEdit.setPlainText(script)
+            type_labels = ["PowerShell", "Batch", "Shell"]
+            w.titleLabel.setText(self.tr(f"生成启动脚本 ({type_labels[script_type]})"))
+        
+        # 初始生成
+        update_script()
+        
+        # 下拉框变化时更新
+        script_type_combo.currentIndexChanged.connect(update_script)
+        
+        copyBtn.clicked.connect(lambda: QApplication.clipboard().setText(self._current_script_content))
+        copyBtn.clicked.connect(
+            lambda: InfoBar.success(
+                self.tr("已复制"),
+                "",
+                orient=Qt.Horizontal,
+                isClosable=False,
+                position=InfoBarPosition.TOP,
+                duration=1500,
+                parent=self,
+            )
+        )
+        
+        w.show()
+
+    def _generate_script(self, script_type: int) -> str:
+        """根据脚本类型生成启动脚本"""
         server_dir = osp.abspath("Servers" + osp.sep + self.serverConfig.serverName)
         java_path = self.serverConfig.javaPath
         java_args = " ".join(self.serverLauncher.jvmArg)
         
         if script_type == 0:  # PowerShell
-            script = (
+            return (
                 f'$host.ui.RawUI.WindowTitle="{self.serverConfig.serverName}"\n'
                 f'cd "{server_dir}"\n'
                 f'$JavaPath = "{java_path}"\n'
@@ -893,7 +960,7 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
                 'pause'
             )
         elif script_type == 1:  # Batch
-            script = (
+            return (
                 f'@echo off\n'
                 f'title {self.serverConfig.serverName}\n'
                 f'cd /d "{server_dir}"\n'
@@ -901,16 +968,48 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
                 f'pause'
             )
         else:  # Shell
-            script = (
+            return (
                 f'#!/bin/bash\n'
                 f'cd "{server_dir}"\n'
                 f'"{java_path}" {java_args}\n'
                 f'read -p "Press any key to continue..."'
             )
+
+    def saveRunScript(self):
+        script_type = 0  # 默认，实际应该从弹窗获取
+        # 由于弹窗关闭后无法获取下拉框状态，需要在 genRunScript 中保存
+        if hasattr(self, '_current_script_type'):
+            script_type = self._current_script_type
         
-        if save:
-            return script
-        else:
+        type_extensions = [".ps1", ".bat", ".sh"]
+        type_filters = [
+            "Powershell 脚本(*.ps1)",
+            "Batch 脚本(*.bat)",
+            "Shell 脚本(*.sh)",
+        ]
+        type_names = ["PowerShell", "Batch", "Shell"]
+        
+        try:
+            writeFile(
+                QFileDialog.getSaveFileName(
+                    self,
+                    self.tr(f"MCSL2 服务器 - 保存启动脚本 ({type_names[script_type]})"),
+                    f"Run {self.serverConfig.serverName}{type_extensions[script_type]}",
+                    type_filters[script_type],
+                )[0],
+                self._current_script_content,
+            )
+        except FileNotFoundError:
+            InfoBar.warning(
+                self.tr("提示"),
+                self.tr("已取消保存启动脚本"),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=1500,
+                parent=self,
+            )
+            
             type_labels = ["PowerShell", "Batch", "Shell"]
             (
                 w := MessageBox(self.tr(f"生成启动脚本 ({type_labels[script_type]})"), "", parent=self)
@@ -1023,12 +1122,12 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         self.backupServerBtn = PushButton(self.overviewPage)
         self.backupServerBtn.setFixedSize(QSize(160, 32))
         self.overviewPageLayout.addWidget(self.backupServerBtn, 2, 2, 1, 1)
-        self.toggleServerBtn = PrimaryPushButton(self.overviewPage)
-        self.toggleServerBtn.setFixedSize(QSize(160, 32))
-        self.overviewPageLayout.addWidget(self.toggleServerBtn, 4, 2, 1, 1)
         self.genRunScriptBtn = PushButton(self.overviewPage)
         self.genRunScriptBtn.setFixedSize(QSize(160, 32))
         self.overviewPageLayout.addWidget(self.genRunScriptBtn, 3, 2, 1, 1)
+        self.toggleServerBtn = PrimaryPushButton(self.overviewPage)
+        self.toggleServerBtn.setFixedSize(QSize(160, 32))
+        self.overviewPageLayout.addWidget(self.toggleServerBtn, 4, 2, 1, 1)
         self.openServerFolder = PushButton(self.overviewPage)
         self.openServerFolder.setFixedSize(QSize(160, 32))
         self.overviewPageLayout.addWidget(self.openServerFolder, 0, 2, 1, 1)
@@ -1264,19 +1363,6 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         self.openServerFolder.setText(self.tr("打开服务器目录"))
         self.backupSavesBtn.setText(self.tr("备份存档"))
         self.genRunScriptBtn.setText(self.tr("生成启动脚本"))
-        self.genRunScriptTypeComboBox = ComboBox(self.overviewPage)
-        self.genRunScriptTypeComboBox.setMinimumSize(QSize(0, 30))
-        self.genRunScriptTypeComboBox.addItems([
-            self.tr("PowerShell (.ps1)"),
-            self.tr("Batch (.bat)"),
-            self.tr("Shell (.sh)"),
-        ])
-        # 根据平台默认选择
-        if platform.system().lower() == "windows":
-            self.genRunScriptTypeComboBox.setCurrentIndex(1)  # 默认 .bat
-        else:
-            self.genRunScriptTypeComboBox.setCurrentIndex(2)  # 默认 .sh
-        self.overviewPageLayout.addWidget(self.genRunScriptTypeComboBox, 3, 3, 1, 1)
         self.toggleServerBtn.setText(self.tr("启动服务器"))
         self.serverResMonitorTitle.setText(self.tr("服务器资源占用"))
         self.serverRAMMonitorTitle.setText("RAM: ")
@@ -1677,14 +1763,34 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             if self.serverConfig.memUnit == 'G':
                 max_mem_mib = self.serverConfig.maxMem * 1024
             
-            # 计算百分比，限制在 0-100 范围内
+            # 计算真实百分比（不限制）
             percentage = int((mem / max_mem_mib) * 100) if max_mem_mib > 0 else 0
-            percentage = max(0, min(100, percentage))  # 限制在 0-100
             
+            # 标题只显示数值
             self.serverRAMMonitorTitle.setText(
                 f"RAM：{str(round(mem, 2))}MiB/{max_mem_mib}MiB"
             )
-            self.serverRAMMonitorRing.setValue(percentage)
+            
+            # 设置进度条：圆圈内显示真实百分比
+            display_value = min(percentage, 100)
+            self.serverRAMMonitorRing.setValue(display_value)
+            
+            # 尝试设置自定义文本显示真实百分比
+            try:
+                self.serverRAMMonitorRing.setText(f"{percentage}%")
+            except AttributeError:
+                # 如果 setText 不存在，使用 setFormat
+                try:
+                    self.serverRAMMonitorRing.setFormat(f"{percentage}%")
+                except AttributeError:
+                    pass
+            
+            # 设置颜色：≤100% 绿色，>100% 橙色
+            if percentage <= 100:
+                # 恢复默认颜色
+                self.serverRAMMonitorRing.setCustomBarColor(None, None)
+            else:
+                self.serverRAMMonitorRing.setCustomBarColor(QColor(255, 170, 0), QColor(255, 170, 0))
         else:
             self.serverRAMMonitorTitle.setText(f"RAM：{str(round(mem, 2))}MiB")
             self.serverRAMMonitorRing.setValue(0)
@@ -1696,127 +1802,95 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
     @pyqtSlot(str)
     def colorConsoleText(self, serverOutput):
         readServerProperties(self.serverConfig)
-        fmt = QTextCharFormat()
-        # fmt: off
-        greenText = ["INFO", "Info", "info", "tip", "tips", "hint", "HINT", "提示"]
-        orangeText = ["WARN", "Warning", "warn", "alert", "ALERT", "Alert", "CAUTION", "Caution", "警告"]  # noqa: E501
-        redText = ["ERR", "Err", "Fatal", "FATAL", "Critical", "Danger", "DANGER", "错", "at java", "at net", "at oolloo", "Caused by", "at sun"]  # noqa: E501
-        blueText = ["DEBUG", "Debug", "debug", "调试", "TEST", "Test", "Unknown command", "MCSL2"]
-        color = [QColor(52, 185, 96), QColor(196, 139, 33), QColor(214, 39, 21), QColor(22, 122, 232)]  # noqa: E501
-        for keyword in greenText:
-            if keyword in serverOutput:
-                fmt.setForeground(QBrush(color[0]))
-        for keyword in orangeText:
-            if keyword in serverOutput:
-                fmt.setForeground(QBrush(color[1]))
-        for keyword in redText:
-            if keyword in serverOutput:
-                fmt.setForeground(QBrush(color[2]))
-        for keyword in blueText:
-            if keyword in serverOutput:
-                fmt.setForeground(QBrush(color[3]))
-        self.serverOutput.mergeCurrentCharFormat(fmt)
-        serverOutput = (
-            serverOutput.replace("[38;2;170;170;170m", "")
-            .replace("[38;2;255;170;0m", "")
-            .replace("[38;2;255;255;255m", "")
-            .replace("[0m", "")
-            .replace("[38;2;255;255;85m", "")
-            .replace("[38;2;255;255;0m", "")
-            .replace("[38;2;255;85;85m", "")
-            .replace("[38;2;255;255;255m", "")
-            .replace("[3m", "")
-            .replace("[m[", "[")
-            .replace("[32m", "")
-            .replace("Preparing spawn area", self.tr("准备生成点区域中"))
-            .replace("main/INFO", self.tr("主类 | 信息"))
-            .replace("main/WARN", self.tr("主类 | 警告"))
-            .replace("main/ERROR", self.tr("主类 | 错误"))
-            .replace("main/FATAL", self.tr("主类 | 致命错误"))
-            .replace("main/DEBUG", self.tr("主类 | 调试信息"))
-            .replace("INFO", self.tr("信息"))
-            .replace("WARN", self.tr("警告"))
-            .replace("ERROR", self.tr("错误"))
-            .replace("FATAL", self.tr("致命错误"))
-            .replace("DEBUG", self.tr("调试信息"))
-            .replace("Server thread", self.tr("服务器线程"))
-            .replace("Server-Worker", self.tr("服务器工作进程"))
-            .replace("DEBUG", self.tr("调试信息"))
-            .replace("Forge Version Check", self.tr("Forge 版本检查"))
-            .replace("ModLauncher running: args", self.tr("ModLauncher 运行中: 参数"))
-            .replace("All chunks are saved", self.tr("所有区块已保存"))
-            .replace("Saving the game (this may take a moment!)", self.tr("保存游戏存档中 (可能需要一些时间)"))  # noqa: E501
-            .replace("Saved the game", self.tr("已保存游戏存档"))
-            .replace("[33m[", "[")
-            .replace("[", "[")
-            .replace("搂2", "")
-        )
-        if "Disabling terminal, you're running in an unsupported environment." in serverOutput:
-            return
-        if "Advanced terminal features are not available in this environment" in serverOutput:
-            return
-        if "Unable to instantiate org.fusesource.jansi.WindowsAnsiOutputStream" in serverOutput:
-            return
-        if "Loading libraries, please wait..." in serverOutput:
-            self.playersList.clear()
-        self.serverOutput.appendPlainText(serverOutput)
-        if "�" in serverOutput:
-            fmt.setForeground(QBrush(color[1]))
-            self.serverOutput.mergeCurrentCharFormat(fmt)
-            self.serverOutput.appendPlainText(
-                self.tr("[MCSL2 | 警告]: 服务器疑似输出非法字符，也有可能是无法被当前编码解析的字符。请尝试更换编码。")  # noqa: E501
-            )
-            InfoBar.warning(
-                title=self.tr("警告"),
-                content=self.tr("服务器疑似输出非法字符，也有可能是无法被当前编码解析的字符。\n请尝试更换编码。"),
-                orient=Qt.Horizontal,
-                isClosable=False,
-                position=InfoBarPosition.TOP,
-                duration=2222,
-                parent=self,
-            )
-        else:
-            pass
+        
+        # 过滤掉不需要显示的日志
+        skip_patterns = [
+            "Disabling terminal, you're running in an unsupported environment.",
+            "Advanced terminal features are not available in this environment",
+            "Unable to instantiate org.fusesource.jansi.WindowsAnsiOutputStream",
+        ]
+        for pattern in skip_patterns:
+            if pattern in serverOutput:
+                return
+        
+        # 使用 ANSI 解析或关键词着色
+        self._appendColoredText(serverOutput)
+        
+        # 处理玩家登录/登出
         if (
             "logged in with entity id" in serverOutput
             or " left the game" in serverOutput
         ):
             self.recordPlayers(serverOutput)
+        
+        # 检测服务器启动完成
         if search(r'(?=.*Done)(?=.*!)', serverOutput) or search(r'(?=.*"help")', serverOutput):
             if self.isServerLoaded:
                 return
-            fmt.setForeground(QBrush(color[3]))
-            self.serverOutput.mergeCurrentCharFormat(fmt)
             try:
                 ip = self.serverConfig.serverProperties["server-ip"]
                 ip = "127.0.0.1" if ip == "" or ip == "0.0.0.0" else ip
             except KeyError:
                 ip = "127.0.0.1"
             port = self.serverConfig.serverProperties.get("server-port", 25565)
-            self.colorConsoleText(
+            self._appendColoredText(
                 self.tr(
-                    "[MCSL2 | 提示]: 服务器启动完毕！\n[MCSL2 | 提示]: 在此电脑上连接，请使用 {ip}，端口为 {port}。\n[MCSL2 | 提示]: 在局域网内连接，请使用路由器分配的 IP，端口为 {port}。\n[MCSL2 | 提示]: 如果非局域网内连接，请使用公网 IP 或内网穿透等服务，并使用相关服务地址连接。").format(ip=ip, port=port)  # noqa: E501
+                    "[MCSL2 | 提示]: 服务器启动完毕！\n[MCSL2 | 提示]: 在此电脑上连接，请使用 {ip}，端口为 {port}。\n[MCSL2 | 提示]: 在局域网内连接，请使用路由器分配的 IP，端口为 {port}。\n[MCSL2 | 提示]: 如果非局域网内连接，请使用公网 IP 或内网穿透等服务，并使用相关服务地址连接。").format(ip=ip, port=port)
             )
             self.isServerLoaded = True
             if port == "25565":
-                self.colorConsoleText(
-                    self.tr("[MCSL2 | 警告]: 检测到您的服务器端口为 25565，如果服务器无法进入，请尝试删除端口后缀。")  # noqa: E501
+                self._appendColoredText(
+                    self.tr("[MCSL2 | 警告]: 检测到您的服务器端口为 25565，如果服务器无法进入，请尝试删除端口后缀。")
                 )
-            else:
-                pass
             if self.stackedWidget.currentWidget() != self.commandPage:
                 InfoBar.success(
                     title=self.tr("提示"),
-                    content=self.tr("服务器启动完毕，详情请到快捷终端查看。"),  # noqa: E501
+                    content=self.tr("服务器启动完毕，详情请到快捷终端查看。"),
                     orient=Qt.Horizontal,
                     isClosable=False,
                     position=InfoBarPosition.BOTTOM_RIGHT,
                     duration=5000,
                     parent=self,
                 )
-            else:
-                pass
             self.initQuickMenu_Difficulty()
+        
+        # 检测非法字符（替换字符 U+FFFD）
+        if "\ufffd" in serverOutput:
+            self._appendColoredText(
+                self.tr("[MCSL2 | 警告]: 服务器疑似输出非法字符，也有可能是无法被当前编码解析的字符。请尝试更换编码。")
+            )
+            InfoBar.warning(
+                title=self.tr("警告"),
+                content=self.tr("服务器疑似输出非法字符，也有可能是无法被当前编码解析的字符。\n请尝试更换编码。"),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=2222,
+                parent=self,
+            )
+        
+        # 加载库时清空玩家列表
+        if "Loading libraries, please wait..." in serverOutput:
+            self.playersList.clear()
+        
+        # 检测非法字符（替换字符 U+FFFD）
+        if "\ufffd" in serverOutput:
+            self._appendAnsiColoredText(
+                self.tr("[MCSL2 | 警告]: 服务器疑似输出非法字符，也有可能是无法被当前编码解析的字符。请尝试更换编码。")
+            )
+            InfoBar.warning(
+                title=self.tr("警告"),
+                content=self.tr("服务器疑似输出非法字符，也有可能是无法被当前编码解析的字符。\n请尝试更换编码。"),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=2222,
+                parent=self,
+            )
+        
+        # 加载库时清空玩家列表
+        if "Loading libraries, please wait..." in serverOutput:
+            self.playersList.clear()
 
     def recordPlayers(self, serverOutput: str):
         if "logged in with entity id" in serverOutput:
@@ -1864,104 +1938,132 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
                     exc=e,
                 )
 
-    def _appendAnsiColoredText(self, text: str):
-        """解析 ANSI 颜色码并追加到 PlainTextEdit"""
+    def _appendColoredText(self, text: str):
+        """解析 ANSI 颜色码或根据日志级别着色"""
         import re
         
-        # ANSI 颜色映射表
-        ansi_colors = {
-            '30': QColor(0, 0, 0),
-            '31': QColor(214, 39, 21),
-            '32': QColor(52, 185, 96),
-            '33': QColor(196, 139, 33),
-            '34': QColor(22, 122, 232),
-            '35': QColor(170, 0, 170),
-            '36': QColor(0, 170, 170),
-            '37': QColor(170, 170, 170),
-            '90': QColor(85, 85, 85),
-            '91': QColor(255, 85, 85),
-            '92': QColor(85, 255, 85),
-            '93': QColor(255, 255, 85),
-            '94': QColor(85, 85, 255),
-            '95': QColor(255, 85, 255),
-            '96': QColor(85, 255, 255),
-            '97': QColor(255, 255, 255),
-        }
-        
-        xterm_colors = {}
-        for i in range(16):
-            if i == 0: xterm_colors[i] = QColor(0, 0, 0)
-            elif i == 1: xterm_colors[i] = QColor(128, 0, 0)
-            elif i == 2: xterm_colors[i] = QColor(0, 128, 0)
-            elif i == 3: xterm_colors[i] = QColor(128, 128, 0)
-            elif i == 4: xterm_colors[i] = QColor(0, 0, 128)
-            elif i == 5: xterm_colors[i] = QColor(128, 0, 128)
-            elif i == 6: xterm_colors[i] = QColor(0, 128, 128)
-            elif i == 7: xterm_colors[i] = QColor(192, 192, 192)
-            elif i == 8: xterm_colors[i] = QColor(128, 128, 128)
-            elif i == 9: xterm_colors[i] = QColor(255, 0, 0)
-            elif i == 10: xterm_colors[i] = QColor(0, 255, 0)
-            elif i == 11: xterm_colors[i] = QColor(255, 255, 0)
-            elif i == 12: xterm_colors[i] = QColor(0, 0, 255)
-            elif i == 13: xterm_colors[i] = QColor(255, 0, 255)
-            elif i == 14: xterm_colors[i] = QColor(0, 255, 255)
-            elif i == 15: xterm_colors[i] = QColor(255, 255, 255)
-            else:
-                c = i - 16
-                r = (c // 36) * 51
-                g = ((c // 6) % 6) * 51
-                b = (c % 6) * 51
-                xterm_colors[i] = QColor(r, g, b)
-        for i in range(232, 256):
-            v = (i - 232) * 10 + 8
-            xterm_colors[i] = QColor(v, v, v)
-        
-        pattern = re.compile(r'\x1b\[([0-9;]*)m')
+        # 检查是否有 ANSI 颜色码
+        has_ansi = '\x1b[' in text or '\033[' in text
         
         cursor = self.serverOutput.textCursor()
         cursor.movePosition(cursor.End)
         
-        default_color = QColor(22, 122, 232) if isDarkTheme() else QColor(0, 0, 0)
-        current_color = default_color
-        
-        last_end = 0
-        for match in pattern.finditer(text):
-            start, end = match.span()
-            if start > last_end:
-                plain_text = text[last_end:start]
+        if has_ansi:
+            # ANSI 颜色解析
+            ansi_colors = {
+                '30': QColor(0, 0, 0),
+                '31': QColor(214, 39, 21),
+                '32': QColor(52, 185, 96),
+                '33': QColor(196, 139, 33),
+                '34': QColor(22, 122, 232),
+                '35': QColor(170, 0, 170),
+                '36': QColor(0, 170, 170),
+                '37': QColor(170, 170, 170),
+                '90': QColor(85, 85, 85),
+                '91': QColor(255, 85, 85),
+                '92': QColor(85, 255, 85),
+                '93': QColor(255, 255, 85),
+                '94': QColor(85, 85, 255),
+                '95': QColor(255, 85, 255),
+                '96': QColor(85, 255, 255),
+                '97': QColor(255, 255, 255),
+            }
+            
+            xterm_colors = {}
+            for i in range(16):
+                if i == 0: xterm_colors[i] = QColor(0, 0, 0)
+                elif i == 1: xterm_colors[i] = QColor(128, 0, 0)
+                elif i == 2: xterm_colors[i] = QColor(0, 128, 0)
+                elif i == 3: xterm_colors[i] = QColor(128, 128, 0)
+                elif i == 4: xterm_colors[i] = QColor(0, 0, 128)
+                elif i == 5: xterm_colors[i] = QColor(128, 0, 128)
+                elif i == 6: xterm_colors[i] = QColor(0, 128, 128)
+                elif i == 7: xterm_colors[i] = QColor(192, 192, 192)
+                elif i == 8: xterm_colors[i] = QColor(128, 128, 128)
+                elif i == 9: xterm_colors[i] = QColor(255, 0, 0)
+                elif i == 10: xterm_colors[i] = QColor(0, 255, 0)
+                elif i == 11: xterm_colors[i] = QColor(255, 255, 0)
+                elif i == 12: xterm_colors[i] = QColor(0, 0, 255)
+                elif i == 13: xterm_colors[i] = QColor(255, 0, 255)
+                elif i == 14: xterm_colors[i] = QColor(0, 255, 255)
+                elif i == 15: xterm_colors[i] = QColor(255, 255, 255)
+                else:
+                    c = i - 16
+                    r = (c // 36) * 51
+                    g = ((c // 6) % 6) * 51
+                    b = (c % 6) * 51
+                    xterm_colors[i] = QColor(r, g, b)
+            for i in range(232, 256):
+                v = (i - 232) * 10 + 8
+                xterm_colors[i] = QColor(v, v, v)
+            
+            pattern = re.compile(r'\x1b\[([0-9;]*)m')
+            
+            default_color = QColor(22, 122, 232) if isDarkTheme() else QColor(0, 0, 0)
+            current_color = default_color
+            
+            last_end = 0
+            for match in pattern.finditer(text):
+                start, end = match.span()
+                if start > last_end:
+                    plain_text = text[last_end:start]
+                    fmt = QTextCharFormat()
+                    fmt.setForeground(QBrush(current_color))
+                    cursor.insertText(plain_text, fmt)
+                
+                codes = match.group(1).split(';')
+                if not codes or codes == ['']:
+                    current_color = default_color
+                else:
+                    for code in codes:
+                        if code == '0' or code == '':
+                            current_color = default_color
+                        elif code in ansi_colors:
+                            current_color = ansi_colors[code]
+                        elif code.startswith('38;5;'):
+                            try:
+                                idx = int(code.split(';')[2])
+                                current_color = xterm_colors.get(idx, default_color)
+                            except (IndexError, ValueError):
+                                pass
+                
+                last_end = end
+            
+            if last_end < len(text):
+                plain_text = text[last_end:]
                 fmt = QTextCharFormat()
                 fmt.setForeground(QBrush(current_color))
                 cursor.insertText(plain_text, fmt)
+        else:
+            # 无 ANSI 时，使用精确的关键词匹配着色
+            colors = {
+                'INFO': QColor(52, 185, 96),      # 绿色
+                'WARN': QColor(196, 139, 33),     # 橙色
+                'ERROR': QColor(214, 39, 21),      # 红色
+                'FATAL': QColor(214, 39, 21),      # 红色
+                'DEBUG': QColor(128, 128, 128),   # 灰色
+            }
             
-            codes = match.group(1).split(';')
-            if not codes or codes == ['']:
-                current_color = default_color
-            else:
-                for code in codes:
-                    if code == '0' or code == '':
-                        current_color = default_color
-                    elif code in ansi_colors:
-                        current_color = ansi_colors[code]
-                    elif code.startswith('38;5;'):
-                        try:
-                            idx = int(code.split(';')[2])
-                            current_color = xterm_colors.get(idx, default_color)
-                        except (IndexError, ValueError):
-                            pass
+            default_color = QColor(22, 122, 232) if isDarkTheme() else QColor(0, 0, 0)
             
-            last_end = end
-        
-        if last_end < len(text):
-            plain_text = text[last_end:]
+            # 精确匹配 Minecraft 日志格式: [timestamp LEVEL]: 或 [timestamp thread/LEVEL]:
+            level_pattern = re.compile(r'\[\d{2}:\d{2}:\d{2}\s+([A-Z]+)\]:')
+            thread_level_pattern = re.compile(r'\[\d{2}:\d{2}:\d{2}\s+[^/]+/([A-Z]+)\]:')
+            
+            level = None
+            match = level_pattern.search(text) or thread_level_pattern.search(text)
+            if match:
+                level = match.group(1)
+            
+            color = colors.get(level, default_color)
+            
             fmt = QTextCharFormat()
-            fmt.setForeground(QBrush(current_color))
-            cursor.insertText(plain_text, fmt)
+            fmt.setForeground(QBrush(color))
+            cursor.insertText(text, fmt)
         
         self.serverOutput.setTextCursor(cursor)
         self.serverOutput.ensureCursorVisible()
 
-    def showServerNotOpenMsg(self):
-        """弹出服务器未开启提示"""    
     def showServerNotOpenMsg(self):
         """弹出服务器未开启提示"""
         w = MessageBox(

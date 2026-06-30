@@ -46,6 +46,7 @@ class MinecraftServerResMonitorUtil(QObject):
         self.timer.timeout.connect(self.getServerCPU)
         self.timer.start(1000)
         self.serverConfig: ServerVariables = serverConfig
+        self._cpu_initialized = False
 
     def getServerMem(self):
         if not self.bridge.isServerRunning():
@@ -68,7 +69,7 @@ class MinecraftServerResMonitorUtil(QObject):
                     self.memPercent.emit(0.0)
                     return
 
-            serverMem = mem_bytes / 1048576
+            serverMem = mem_bytes / 1048576  # 转换为 MiB
             self.memPercent.emit(float(f"{serverMem:.4f}"))
         except NoSuchProcess:
             self.memPercent.emit(0.0)
@@ -86,11 +87,20 @@ class MinecraftServerResMonitorUtil(QObject):
 
         try:
             process = Process(self.bridge.handledServer.process.processId())
+            if not self._cpu_initialized:
+                # 第一次调用，初始化基准
+                process.cpu_percent(interval=None)
+                self._cpu_initialized = True
+                self.cpuPercent.emit(0.0)
+                return
+            
+            # 第二次及以后调用，获取有效值
             cpu_percent = process.cpu_percent(interval=None)
             if cpu_percent is None:
                 cpu_percent = 0.0
             self.cpuPercent.emit(float(f"{cpu_percent:.4f}"))
         except NoSuchProcess:
+            self._cpu_initialized = False
             self.cpuPercent.emit(0.0)
         except (PermissionError, AccessDenied):
             self.cpuPercent.emit(0.0)
@@ -102,6 +112,7 @@ class MinecraftServerResMonitorUtil(QObject):
     def onServerClosedHandler(self):
         self.cpuPercent.emit(0.0)
         self.memPercent.emit(0.0)
+        self._cpu_initialized = False
         self.timer.stop()
 
 
@@ -121,32 +132,6 @@ def readServerProperties(serverConfig: ServerVariables):
                     serverConfig.serverProperties[key.strip()] = value.strip()
     except FileNotFoundError:
         serverConfig.serverProperties.update({"msg": "File not found"})
-
-
-# class CrashMCAnalyzerThread(QThread):
-#     resSignal = pyqtSignal(str)
-
-#     def __init__(self, log: str, parent=None):
-#         super().__init__(parent)
-#         self.log = log
-
-#     def run(self):
-#         headers = MCSLNetworkSession.MCSLNetworkHeaders
-#         headers["Content-Type"] = "text/plain"
-#         headers["Accept"] = "application/json"
-
-#         apiResult = MCSLNetworkSession().post(
-#             url="https://api.crashmc.com/v0/analyze/",
-#             data=self.log,
-#             headers=headers,
-#         )
-#         if apiResult.status_code == 200:
-#             if apiResult.json().get("res"):
-#                 error = ""
-#                 for matchError in apiResult.json().get("res"):
-#                     pass
-#         else:
-#             self.resSignal.emit(f"CrashMC接口请求失败，HTTP Status Code: {apiResult.status_code}")
 
 
 class MakeArchiveThread(QThread):

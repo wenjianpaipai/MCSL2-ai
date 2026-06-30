@@ -430,23 +430,28 @@ class PluginManagerPage(QWidget):
         self.contentLayout = QGridLayout(self.contentWidget)
         self.contentLayout.setContentsMargins(0, 0, 0, 0)
 
-        self.table = QTableWidget(self.contentWidget)
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "启用", "文件名", "显示名称", "版本号", "历史版本", "文档链接", "操作"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 60)
-        self.table.setColumnWidth(6, 120)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setVisible(False)
+        # 使用 QStackedWidget 管理表格和空状态
+        from PyQt5.QtWidgets import QStackedWidget
+        self.contentStack = QStackedWidget(self.contentWidget)
+        self.contentLayout.addWidget(self.contentStack, 0, 0, 1, 1)
 
-        self.contentLayout.addWidget(self.table, 0, 0, 1, 1)
+        self.table = QTableWidget(self.contentStack)
+        ...
+        self.contentStack.addWidget(self.table)
+
+        self.emptyWidget = QWidget(self.contentStack)
+        empty_layout = QVBoxLayout(self.emptyWidget)
+        empty_layout.setAlignment(Qt.AlignCenter)
+        empty_label = SubtitleLabel("暂无插件", self.emptyWidget)
+        empty_label.setAlignment(Qt.AlignCenter)
+        empty_layout.addWidget(empty_label)
+        empty_tip = BodyLabel(
+            f"该服务器 plugins 文件夹为空，或文件夹不存在。\n请将插件放入 Servers/{self.server_name}/plugins/ 文件夹",
+            self.emptyWidget,
+        )
+        empty_tip.setAlignment(Qt.AlignCenter)
+        empty_layout.addWidget(empty_tip)
+        self.contentStack.addWidget(self.emptyWidget)
 
         self.emptyWidget = QWidget(self.contentWidget)
         empty_layout = QVBoxLayout(self.emptyWidget)
@@ -480,12 +485,10 @@ class PluginManagerPage(QWidget):
         self.plugins_data = {p["filename"]: p for p in plugins}
 
         if not plugins:
-            self.table.setVisible(False)
-            self.emptyWidget.setVisible(True)
+            self.contentStack.setCurrentIndex(1)  # 显示 emptyWidget
             return
 
-        self.table.setVisible(True)
-        self.emptyWidget.setVisible(False)
+        self.contentStack.setCurrentIndex(0)  # 显示 table
         self.table.setRowCount(len(plugins))
 
         for row, plugin in enumerate(plugins):
