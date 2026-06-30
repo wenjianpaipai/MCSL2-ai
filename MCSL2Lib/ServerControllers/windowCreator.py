@@ -1578,8 +1578,9 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             btn.setEnabled(True)
 
     def registerCommandOutput(self):
+        # 先断开所有可能的连接，防止重复
         try:
-            self.serverBridge.serverLogOutput.disconnect(self.colorConsoleText)
+            self.serverBridge.serverLogOutput.disconnect()
         except (AttributeError, TypeError):
             pass
         self.serverBridge.serverLogOutput.connect(self.colorConsoleText)
@@ -1850,6 +1851,104 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
                     exc=e,
                 )
 
+    def _appendAnsiColoredText(self, text: str):
+        """解析 ANSI 颜色码并追加到 PlainTextEdit"""
+        import re
+        
+        # ANSI 颜色映射表
+        ansi_colors = {
+            '30': QColor(0, 0, 0),
+            '31': QColor(214, 39, 21),
+            '32': QColor(52, 185, 96),
+            '33': QColor(196, 139, 33),
+            '34': QColor(22, 122, 232),
+            '35': QColor(170, 0, 170),
+            '36': QColor(0, 170, 170),
+            '37': QColor(170, 170, 170),
+            '90': QColor(85, 85, 85),
+            '91': QColor(255, 85, 85),
+            '92': QColor(85, 255, 85),
+            '93': QColor(255, 255, 85),
+            '94': QColor(85, 85, 255),
+            '95': QColor(255, 85, 255),
+            '96': QColor(85, 255, 255),
+            '97': QColor(255, 255, 255),
+        }
+        
+        xterm_colors = {}
+        for i in range(16):
+            if i == 0: xterm_colors[i] = QColor(0, 0, 0)
+            elif i == 1: xterm_colors[i] = QColor(128, 0, 0)
+            elif i == 2: xterm_colors[i] = QColor(0, 128, 0)
+            elif i == 3: xterm_colors[i] = QColor(128, 128, 0)
+            elif i == 4: xterm_colors[i] = QColor(0, 0, 128)
+            elif i == 5: xterm_colors[i] = QColor(128, 0, 128)
+            elif i == 6: xterm_colors[i] = QColor(0, 128, 128)
+            elif i == 7: xterm_colors[i] = QColor(192, 192, 192)
+            elif i == 8: xterm_colors[i] = QColor(128, 128, 128)
+            elif i == 9: xterm_colors[i] = QColor(255, 0, 0)
+            elif i == 10: xterm_colors[i] = QColor(0, 255, 0)
+            elif i == 11: xterm_colors[i] = QColor(255, 255, 0)
+            elif i == 12: xterm_colors[i] = QColor(0, 0, 255)
+            elif i == 13: xterm_colors[i] = QColor(255, 0, 255)
+            elif i == 14: xterm_colors[i] = QColor(0, 255, 255)
+            elif i == 15: xterm_colors[i] = QColor(255, 255, 255)
+            else:
+                c = i - 16
+                r = (c // 36) * 51
+                g = ((c // 6) % 6) * 51
+                b = (c % 6) * 51
+                xterm_colors[i] = QColor(r, g, b)
+        for i in range(232, 256):
+            v = (i - 232) * 10 + 8
+            xterm_colors[i] = QColor(v, v, v)
+        
+        pattern = re.compile(r'\x1b\[([0-9;]*)m')
+        
+        cursor = self.serverOutput.textCursor()
+        cursor.movePosition(cursor.End)
+        
+        default_color = QColor(22, 122, 232) if isDarkTheme() else QColor(0, 0, 0)
+        current_color = default_color
+        
+        last_end = 0
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            if start > last_end:
+                plain_text = text[last_end:start]
+                fmt = QTextCharFormat()
+                fmt.setForeground(QBrush(current_color))
+                cursor.insertText(plain_text, fmt)
+            
+            codes = match.group(1).split(';')
+            if not codes or codes == ['']:
+                current_color = default_color
+            else:
+                for code in codes:
+                    if code == '0' or code == '':
+                        current_color = default_color
+                    elif code in ansi_colors:
+                        current_color = ansi_colors[code]
+                    elif code.startswith('38;5;'):
+                        try:
+                            idx = int(code.split(';')[2])
+                            current_color = xterm_colors.get(idx, default_color)
+                        except (IndexError, ValueError):
+                            pass
+            
+            last_end = end
+        
+        if last_end < len(text):
+            plain_text = text[last_end:]
+            fmt = QTextCharFormat()
+            fmt.setForeground(QBrush(current_color))
+            cursor.insertText(plain_text, fmt)
+        
+        self.serverOutput.setTextCursor(cursor)
+        self.serverOutput.ensureCursorVisible()
+
+    def showServerNotOpenMsg(self):
+        """弹出服务器未开启提示"""    
     def showServerNotOpenMsg(self):
         """弹出服务器未开启提示"""
         w = MessageBox(
