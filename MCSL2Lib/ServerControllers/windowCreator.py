@@ -792,6 +792,12 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             self.stackedWidget.setCurrentWidget(self.configEditorPage)
             self.isCalledByConfigEditor = False
 
+    def setupPluginManagerPage(self):
+        """设置插件管理页面"""
+        from MCSL2Lib.Widgets.serverPluginManagerWidget import PluginManagerPage
+        self.pluginManagerPage = PluginManagerPage(self.serverConfig.serverName, self)
+        self.stackedWidget.addWidget(self.pluginManagerPage)
+
     def closeEvent(self, a0) -> None:
         if self.isCalledByConfigEditor:
             try:
@@ -1187,6 +1193,7 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         )
         self.analyzePageLayout.addWidget(self.switchAnalyzeProviderBtn, 0, 0, 1, 3)
         self.stackedWidget.addWidget(self.analyzePage)
+        self.setupPluginManagerPage()
         self.gridLayout.addWidget(self.stackedWidget, 2, 1, 2, 1)
 
     def initQuickMenu(self):
@@ -1361,6 +1368,12 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             text=self.tr("错误分析"),
             onClick=lambda: self.stackedWidget.setCurrentWidget(self.analyzePage),
             icon=FIF.SEARCH_MIRROR,
+        )
+        self.serverSegmentedWidget.addItem(
+            routeKey="pluginManagerPage",
+            text=self.tr("插件管理"),
+            onClick=lambda: self.stackedWidget.setCurrentWidget(self.pluginManagerPage),
+            icon=FIF.LIBRARY_FILL,
         )
         self.serverSegmentedWidget.setCurrentItem("overviewPage")
 
