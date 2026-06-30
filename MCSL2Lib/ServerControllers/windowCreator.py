@@ -855,23 +855,59 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         del self.serverConfig
         del self.serverLauncher
         del self
+        
+    def _onToggleServerBtnClicked(self):
+        """概览页启动/关闭服务器按钮点击处理"""
+        if self.getRunningStatus():
+            # 服务器正在运行，执行关闭
+            self.runQuickMenu_StopServer()
+        else:
+            # 服务器未运行，执行启动
+            self.startServer()
 
     def genRunScript(self, save=False):
         if not hasattr(self.serverLauncher, "jvmArg"):
             self.serverLauncher._setJVMArg()
-        script = (
-            f'$host.ui.RawUI.WindowTitle="{self.serverConfig.serverName}"'
-            f'\ncd "{osp.abspath("Servers" + osp.sep + self.serverConfig.serverName)}"'
-            + f'\n$JavaPath = "{self.serverConfig.javaPath}"'
-            + f'\n$JavaArgs = "{" ".join(self.serverLauncher.jvmArg)}"\n'
-            + "Start-Process -FilePath $JavaPath -ArgumentList $JavaArgs -NoNewWindow -Wait\n"
-            + "pause"
-        )
+        
+        script_type = self.genRunScriptTypeComboBox.currentIndex() if hasattr(self, 'genRunScriptTypeComboBox') else 0
+        script_type_names = [".ps1", ".bat", ".sh"]
+        script_type_name = script_type_names[script_type]
+        
+        server_dir = osp.abspath("Servers" + osp.sep + self.serverConfig.serverName)
+        java_path = self.serverConfig.javaPath
+        java_args = " ".join(self.serverLauncher.jvmArg)
+        
+        if script_type == 0:  # PowerShell
+            script = (
+                f'$host.ui.RawUI.WindowTitle="{self.serverConfig.serverName}"\n'
+                f'cd "{server_dir}"\n'
+                f'$JavaPath = "{java_path}"\n'
+                f'$JavaArgs = "{java_args}"\n'
+                'Start-Process -FilePath $JavaPath -ArgumentList $JavaArgs -NoNewWindow -Wait\n'
+                'pause'
+            )
+        elif script_type == 1:  # Batch
+            script = (
+                f'@echo off\n'
+                f'title {self.serverConfig.serverName}\n'
+                f'cd /d "{server_dir}"\n'
+                f'"{java_path}" {java_args}\n'
+                f'pause'
+            )
+        else:  # Shell
+            script = (
+                f'#!/bin/bash\n'
+                f'cd "{server_dir}"\n'
+                f'"{java_path}" {java_args}\n'
+                f'read -p "Press any key to continue..."'
+            )
+        
         if save:
             return script
         else:
+            type_labels = ["PowerShell", "Batch", "Shell"]
             (
-                w := MessageBox(self.tr("生成启动脚本 (PowerShell)"), "", parent=self)
+                w := MessageBox(self.tr(f"生成启动脚本 ({type_labels[script_type]})"), "", parent=self)
             ).contentLabel.setParent(None)
             w.yesButton.setText(self.tr("保存"))
             w.yesSignal.connect(self.saveRunScript)
@@ -903,13 +939,22 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             w.show()
 
     def saveRunScript(self):
+        script_type = self.genRunScriptTypeComboBox.currentIndex() if hasattr(self, 'genRunScriptTypeComboBox') else 0
+        type_extensions = [".ps1", ".bat", ".sh"]
+        type_filters = [
+            "Powershell 脚本(*.ps1)",
+            "Batch 脚本(*.bat)",
+            "Shell 脚本(*.sh)",
+        ]
+        type_names = ["PowerShell", "Batch", "Shell"]
+        
         try:
             writeFile(
                 QFileDialog.getSaveFileName(
                     self,
-                    self.tr("MCSL2 服务器 - 保存启动脚本"),
-                    f"Run {self.serverConfig.serverName}.ps1",
-                    "Powershell 脚本(*.ps1)",
+                    self.tr(f"MCSL2 服务器 - 保存启动脚本 ({type_names[script_type]})"),
+                    f"Run {self.serverConfig.serverName}{type_extensions[script_type]}",
+                    type_filters[script_type],
                 )[0],
                 self.genRunScript(save=True),
             )
@@ -1212,6 +1257,19 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
         self.openServerFolder.setText(self.tr("打开服务器目录"))
         self.backupSavesBtn.setText(self.tr("备份存档"))
         self.genRunScriptBtn.setText(self.tr("生成启动脚本"))
+        self.genRunScriptTypeComboBox = ComboBox(self.overviewPage)
+        self.genRunScriptTypeComboBox.setMinimumSize(QSize(0, 30))
+        self.genRunScriptTypeComboBox.addItems([
+            self.tr("PowerShell (.ps1)"),
+            self.tr("Batch (.bat)"),
+            self.tr("Shell (.sh)"),
+        ])
+        # 根据平台默认选择
+        if platform.system().lower() == "windows":
+            self.genRunScriptTypeComboBox.setCurrentIndex(1)  # 默认 .bat
+        else:
+            self.genRunScriptTypeComboBox.setCurrentIndex(2)  # 默认 .sh
+        self.overviewPageLayout.addWidget(self.genRunScriptTypeComboBox, 3, 3, 1, 1)
         self.toggleServerBtn.setText(self.tr("启动服务器"))
         self.serverResMonitorTitle.setText(self.tr("服务器资源占用"))
         self.serverRAMMonitorTitle.setText("RAM: ")
@@ -1254,6 +1312,7 @@ class ServerWindow(BackgroundAnimationWidget, FramelessWindow):
             lambda: openLocalFile(f"./Servers/{self.serverConfig.serverName}")
         )
         self.genRunScriptBtn.clicked.connect(self.genRunScript)
+        self.toggleServerBtn.clicked.connect(self._onToggleServerBtnClicked)
         self.backupServerBtn.clicked.connect(
             lambda: backupServer(serverName=self.serverConfig.serverName, parent=self)
         )
